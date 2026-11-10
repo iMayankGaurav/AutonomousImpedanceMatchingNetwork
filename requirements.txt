@@ -1,0 +1,6 @@
+pyserial
+numpy
+torch
+streamlit
+matplotlib
+pytest
