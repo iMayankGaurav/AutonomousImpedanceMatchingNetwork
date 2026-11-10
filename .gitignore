@@ -1,0 +1,85 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+env.bak/
+venv.bak/
+
+# PyTorch / ML checkpoints and training artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+# Keep dqn_policy.pt if tracked or as template if needed, uncomment below if tracking:
+# !ai/models/dqn_policy.pt
+
+# Data, tuning logs, and run outputs
+data/*.csv
+!data/.gitkeep
+*.log
+runs/
+wandb/
+
+# Arduino build artifacts
+*.hex
+*.elf
+*.bin
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Nested duplicated folder if created by accident
+project_root/
+
