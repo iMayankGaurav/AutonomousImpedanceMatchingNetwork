@@ -36,6 +36,7 @@ venv.bak/
 
 # PyTorch / ML checkpoints and training artifacts
 *.pt
+!models/model.pt
 *.pth
 *.ckpt
 *.onnx
