@@ -1,0 +1,71 @@
+{
+  "status": "completed",
+  "config": {
+    "num_episodes": 1000,
+    "max_steps": 140,
+    "lr": 0.001,
+    "gamma": 0.99,
+    "buffer_capacity": 50000,
+    "batch_size": 64,
+    "eps_start": 1.0,
+    "eps_end": 0.05,
+    "eps_decay_steps": 25000,
+    "warmup_steps": 500,
+    "target_update_freq": 250,
+    "hidden_dims": [
+      128,
+      128
+    ],
+    "huber_beta": 1.0,
+    "max_grad_norm": 10.0,
+    "match_vswr_threshold": 1.5,
+    "success_vswr": 1.2,
+    "checkpoint_interval": 200,
+    "seed": 42,
+    "device": "cpu"
+  },
+  "completed_episodes": 1000,
+  "total_env_steps": 72220,
+  "train_load_count": 1398,
+  "holdout_load_count": 350,
+  "unmatchable_envelope_count": 7553,
+  "full_range_unmatchable_count": 4461,
+  "full_range_total_scanned": 4617,
+  "final_model_path": "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/models/model.pt",
+  "periodic_checkpoints": [
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/checkpoints/double_dqn_ep0200.pt",
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/checkpoints/double_dqn_ep0400.pt",
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/checkpoints/double_dqn_ep0600.pt",
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/checkpoints/double_dqn_ep0800.pt"
+  ],
+  "metrics_csv_path": "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/logs/double_dqn_metrics.csv",
+  "unmatchable_report_path": "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/logs/double_dqn_unmatchable_loads.json",
+  "plots": [
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/figures/double_dqn_episode_reward.png",
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/figures/double_dqn_rolling_average_reward.png",
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/figures/double_dqn_final_vswr.png",
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/figures/double_dqn_success_rate.png",
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/figures/double_dqn_epsilon_decay.png",
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/figures/double_dqn_training_loss.png",
+    "/home/mayank/Documents/AutonomousImpedanceMatchingNetwork/rl/figures/double_dqn_overview.png"
+  ],
+  "nan_or_inf_events": 0,
+  "max_observed_grad_norm": 57.117767,
+  "early_window": {
+    "episodes": "1-50",
+    "mean_reward": -90.9931,
+    "mean_final_gamma_abs": 0.5431,
+    "mean_episode_length": 128.56,
+    "success_rate": 0.18
+  },
+  "late_window": {
+    "episodes": "951-1000",
+    "mean_reward": 26.2052,
+    "mean_final_gamma_abs": 0.1235,
+    "mean_episode_length": 61.06,
+    "success_rate": 0.94,
+    "mean_loss": 0.636786
+  },
+  "overall_success_rate": 0.842,
+  "final_epsilon": 0.05
+}
