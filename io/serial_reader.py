@@ -228,8 +228,8 @@ class SerialReader:
 
         # Latest valid measurement (nominal fallback matching contract)
         self._latest_data: dict[str, float] = {
-            "RL": 50.0,
-            "XL": 0.0,
+            "RL": 13.5,
+            "XL": 69.5,
             "V1_man": 1.65,
             "V2_man": 1.65,
             "t": time.time(),
@@ -241,8 +241,8 @@ class SerialReader:
             "adc_XL": 2048,
             "adc_V1": 2048,
             "adc_V2": 2048,
-            "RL_raw": 80.0,
-            "XL_raw": 0.0,
+            "RL_raw": 13.5,
+            "XL_raw": 69.5,
             "V1_raw": 1.65,
             "V2_raw": 1.65,
             "line": "",

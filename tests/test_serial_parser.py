@@ -218,34 +218,34 @@ def test_adc_to_physical_mapping() -> None:
     # Boundary 1: Minimum ADC count (0)
     rl_min, xl_min, v1_min, v2_min = adc_to_physical(0, 0, 0, 0)
     assert math.isclose(rl_min, 10.0, rel_tol=1e-6)
-    assert math.isclose(xl_min, -100.0, rel_tol=1e-6)
+    assert math.isclose(xl_min, 62.0, rel_tol=1e-6)
     assert math.isclose(v1_min, 0.0, rel_tol=1e-6)
     assert math.isclose(v2_min, 0.0, rel_tol=1e-6)
 
     # Boundary 2: Maximum ADC count (4095)
     rl_max, xl_max, v1_max, v2_max = adc_to_physical(4095, 4095, 4095, 4095)
-    assert math.isclose(rl_max, 150.0, rel_tol=1e-6)
-    assert math.isclose(xl_max, 100.0, rel_tol=1e-6)
+    assert math.isclose(rl_max, 17.0, rel_tol=1e-6)
+    assert math.isclose(xl_max, 77.0, rel_tol=1e-6)
     assert math.isclose(v1_max, 3.3, rel_tol=1e-6)
     assert math.isclose(v2_max, 3.3, rel_tol=1e-6)
 
     # Midpoint: ADC count 2048
-    # RL = 10 + (2048/4095) * 140 = 80.01709...
-    # XL = -100 + (2048/4095) * 200 = 0.02442...
-    # V  = (2048/4095) * 3.3 = 1.65040...
+    # RL = 10 + (2048/4095) * 7.0
+    # XL = 62 + (2048/4095) * 15.0
+    # V  = (2048/4095) * 3.3
     rl_mid = adc_to_rl(2048)
     xl_mid = adc_to_xl(2048)
     v_mid = adc_to_v(2048)
 
-    assert math.isclose(rl_mid, 10.0 + (2048.0 / 4095.0) * 140.0, rel_tol=1e-6)
-    assert math.isclose(xl_mid, -100.0 + (2048.0 / 4095.0) * 200.0, rel_tol=1e-6)
+    assert math.isclose(rl_mid, 10.0 + (2048.0 / 4095.0) * 7.0, rel_tol=1e-6)
+    assert math.isclose(xl_mid, 62.0 + (2048.0 / 4095.0) * 15.0, rel_tol=1e-6)
     assert math.isclose(v_mid, (2048.0 / 4095.0) * 3.3, rel_tol=1e-6)
 
     # Clamping behavior for out-of-range counts
     assert math.isclose(adc_to_rl(-50), 10.0, rel_tol=1e-6)
-    assert math.isclose(adc_to_rl(9999), 150.0, rel_tol=1e-6)
-    assert math.isclose(adc_to_xl(-10), -100.0, rel_tol=1e-6)
-    assert math.isclose(adc_to_xl(5000), 100.0, rel_tol=1e-6)
+    assert math.isclose(adc_to_rl(9999), 17.0, rel_tol=1e-6)
+    assert math.isclose(adc_to_xl(-10), 62.0, rel_tol=1e-6)
+    assert math.isclose(adc_to_xl(5000), 77.0, rel_tol=1e-6)
     assert math.isclose(adc_to_v(-5), 0.0, rel_tol=1e-6)
     assert math.isclose(adc_to_v(8000), 3.3, rel_tol=1e-6)
 
@@ -366,8 +366,8 @@ def test_mock_source_value_ranges() -> None:
         v1 = frame["V1_man"]
         v2 = frame["V2_man"]
 
-        assert 10.0 <= rl <= 150.0, f"RL out of bounds: {rl}"
-        assert -100.0 <= xl <= 100.0, f"XL out of bounds: {xl}"
+        assert 10.0 <= rl <= 17.0, f"RL out of bounds: {rl}"
+        assert 62.0 <= xl <= 77.0, f"XL out of bounds: {xl}"
         assert 0.0 <= v1 <= 3.3, f"V1 out of bounds: {v1}"
         assert 0.0 <= v2 <= 3.3, f"V2 out of bounds: {v2}"
 
@@ -425,8 +425,8 @@ def test_public_get_latest_api_contract() -> None:
     d = get_latest()
     assert isinstance(d, dict)
     assert set(d.keys()) == {"RL", "XL", "V1_man", "V2_man", "t"}
-    assert 10.0 <= d["RL"] <= 150.0
-    assert -100.0 <= d["XL"] <= 100.0
+    assert 10.0 <= d["RL"] <= 17.0
+    assert 62.0 <= d["XL"] <= 77.0
     assert 0.0 <= d["V1_man"] <= 3.3
     assert 0.0 <= d["V2_man"] <= 3.3
 

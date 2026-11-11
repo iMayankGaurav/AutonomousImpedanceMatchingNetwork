@@ -36,8 +36,8 @@ AutonomousImpedanceMatchingNetwork/
 #### `io/filters.py`
 Contains all signal processing, boundary clamping, and unit translation logic:
 - `clamp_adc(val)`: Restricts ADC values strictly to $[0.0, 4095.0]$.
-- `adc_to_rl(adc)`: Converts ADC count to load resistance $R_L \in [10.0, 150.0]\,\Omega$.
-- `adc_to_xl(adc)`: Converts ADC count to load reactance $X_L \in [-100.0, 100.0]\,\Omega$.
+- `adc_to_rl(adc)`: Converts ADC count to load resistance $R_L \in [10.0, 17.0]\,\Omega$.
+- `adc_to_xl(adc)`: Converts ADC count to load reactance $X_L \in [62.0, 77.0]\,\Omega$.
 - `adc_to_v(adc)`: Converts ADC count to varactor bias voltage $V \in [0.0, 3.3]\,\text{V}$.
 - `adc_to_physical(...)`: Batch converts all 4 channels to `(RL, XL, V1, V2)`.
 - `EMAFilter`: Configurable Exponential Moving Average low-pass filter with zero-offset first-sample initialization and reset functionality.
@@ -79,16 +79,16 @@ The STM32F446RE ADC operates in 12-bit mode with a reference voltage $V_{REF} = 
 $$\text{ADC counts} \in [0, 4095], \quad N = 4095$$
 
 #### 1. Load Resistance ($R_L$)
-Mapped linearly across the design disturbance range $[10.0, 150.0]\,\Omega$:
+Mapped linearly across the updated design disturbance range $[10.0, 17.0]\,\Omega$:
 $$R_L = R_{L,\min} + \left(\frac{\text{adc}_{RL}}{4095}\right) \times (R_{L,\max} - R_{L,\min})$$
-$$R_L = 10.0 + \left(\frac{\text{adc}_{RL}}{4095}\right) \times 140.0 \quad [\Omega]$$
-- Boundary Check: $\text{adc}_{RL} = 0 \implies R_L = 10.0\,\Omega$; $\text{adc}_{RL} = 4095 \implies R_L = 150.0\,\Omega$.
+$$R_L = 10.0 + \left(\frac{\text{adc}_{RL}}{4095}\right) \times 7.0 \quad [\Omega]$$
+- Boundary Check: $\text{adc}_{RL} = 0 \implies R_L = 10.0\,\Omega$; $\text{adc}_{RL} = 4095 \implies R_L = 17.0\,\Omega$.
 
 #### 2. Load Reactance ($X_L$)
-Mapped symmetrically across inductive and capacitive disturbance ranges $[-100.0, +100.0]\,\Omega$:
+Mapped across the updated inductive disturbance range $[62.0, 77.0]\,\Omega$:
 $$X_L = X_{L,\min} + \left(\frac{\text{adc}_{XL}}{4095}\right) \times (X_{L,\max} - X_{L,\min})$$
-$$X_L = -100.0 + \left(\frac{\text{adc}_{XL}}{4095}\right) \times 200.0 \quad [\Omega]$$
-- Boundary Check: $\text{adc}_{XL} = 0 \implies X_L = -100.0\,\Omega$; $\text{adc}_{XL} = 4095 \implies X_L = +100.0\,\Omega$; $\text{adc}_{XL} = 2048 \implies X_L \approx 0.02\,\Omega$.
+$$X_L = 62.0 + \left(\frac{\text{adc}_{XL}}{4095}\right) \times 15.0 \quad [\Omega]$$
+- Boundary Check: $\text{adc}_{XL} = 0 \implies X_L = 62.0\,\Omega$; $\text{adc}_{XL} = 4095 \implies X_L = 77.0\,\Omega$; $\text{adc}_{XL} = 2048 \implies X_L \approx 69.5\,\Omega$.
 
 #### 3. Varactor Manual Control Voltages ($V_1, V_2$)
 Linear scaling directly against the ADC full-scale voltage:
@@ -127,8 +127,8 @@ For window length $K = 3$, single-sample spikes (such as a transient reading of 
 ### 3.3 Mock Source Simulation Dynamics
 
 `MockSource` simulates realistic continuous-time impedance fluctuations using a multi-frequency model:
-$$R_L(t) = \text{clip}\left(80.0 + 45\sin(2\pi \cdot 0.08 t) + 15\sin(2\pi \cdot 0.02 t + 0.5) + \delta_{RL} + \mathcal{N}(0, 0.4^2), 10.0, 150.0\right)$$
-$$X_L(t) = \text{clip}\left(65\sin(2\pi \cdot 0.06 t + 1.2) + 20\cos(2\pi \cdot 0.015 t) + \delta_{XL} + \mathcal{N}(0, 0.4^2), -100.0, 100.0\right)$$
+$$R_L(t) = \text{clip}\left(13.5 + 2.2\sin(2\pi \cdot 0.08 t) + 0.8\sin(2\pi \cdot 0.02 t + 0.5) + \delta_{RL} + \mathcal{N}(0, 0.05^2), 10.0, 17.0\right)$$
+$$X_L(t) = \text{clip}\left(69.5 + 5.0\sin(2\pi \cdot 0.06 t + 1.2) + 1.5\cos(2\pi \cdot 0.015 t) + \delta_{XL} + \mathcal{N}(0, 0.1^2), 62.0, 77.0\right)$$
 $$V_1(t) = \text{clip}\left(1.65 + 1.2\sin(2\pi \cdot 0.04 t) + \mathcal{N}(0, 0.01^2), 0.0, 3.3\right)$$
 $$V_2(t) = \text{clip}\left(1.65 + 1.2\cos(2\pi \cdot 0.035 t + 0.9) + \mathcal{N}(0, 0.01^2), 0.0, 3.3\right)$$
 Where $\delta_{RL}, \delta_{XL}$ are step disturbance offsets injected with probability $P = 0.02$ per step and decayed exponentially ($\gamma = 0.995$) to simulate physical antenna hand contact.
@@ -147,8 +147,8 @@ get_latest() -> dict[str, float]
 
 ```python
 {
-    "RL": float,       # Load resistance in Ohms [10.0, 150.0]
-    "XL": float,       # Load reactance in Ohms [-100.0, 100.0]
+    "RL": float,       # Load resistance in Ohms [10.0, 17.0]
+    "XL": float,       # Load reactance in Ohms [62.0, 77.0]
     "V1_man": float,   # Manual varactor tuning voltage 1 in Volts [0.0, 3.3]
     "V2_man": float,   # Manual varactor tuning voltage 2 in Volts [0.0, 3.3]
     "t": float         # Unix epoch timestamp in seconds

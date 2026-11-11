@@ -2,8 +2,8 @@
 
 Converts 12-bit ADC raw counts (0-4095) from STM32 potentiometer channels into
 physical units:
-    - ADC 1 (RL): Load resistance (10 to 150 Ohms)
-    - ADC 2 (XL): Load reactance (-100 to +100 Ohms)
+    - ADC 1 (RL): Load resistance (10 to 17 Ohms)
+    - ADC 2 (XL): Load reactance (62 to 77 Ohms)
     - ADC 3 (V1): Manual varactor bias voltage 1 (0 to 3.3 V)
     - ADC 4 (V2): Manual varactor bias voltage 2 (0 to 3.3 V)
 
@@ -23,9 +23,9 @@ ADC_MAX: int = 4095
 ADC_VREF: float = 3.3
 
 RL_MIN: float = 10.0
-RL_MAX: float = 150.0
-XL_MIN: float = -100.0
-XL_MAX: float = 100.0
+RL_MAX: float = 17.0
+XL_MIN: float = 62.0
+XL_MAX: float = 77.0
 V_MIN: float = 0.0
 V_MAX: float = 3.3
 
@@ -49,13 +49,13 @@ def adc_to_rl(adc_rl: float | int) -> float:
     """Convert raw ADC count to load resistance RL in Ohms.
 
     Formula:
-        RL = 10 + (adc_RL / 4095) * (150 - 10)
+        RL = 10 + (adc_RL / 4095) * (17 - 10)
 
     Args:
         adc_rl: ADC count for channel 1 (0..4095).
 
     Returns:
-        Resistance in Ohms in range [10.0, 150.0].
+        Resistance in Ohms in range [10.0, 17.0].
     """
     clamped = clamp_adc(adc_rl)
     return RL_MIN + (clamped / ADC_MAX) * (RL_MAX - RL_MIN)
@@ -65,13 +65,13 @@ def adc_to_xl(adc_xl: float | int) -> float:
     """Convert raw ADC count to load reactance XL in Ohms.
 
     Formula:
-        XL = -100 + (adc_XL / 4095) * 200
+        XL = 62 + (adc_XL / 4095) * (77 - 62)
 
     Args:
         adc_xl: ADC count for channel 2 (0..4095).
 
     Returns:
-        Reactance in Ohms in range [-100.0, +100.0].
+        Reactance in Ohms in range [62.0, 77.0].
     """
     clamped = clamp_adc(adc_xl)
     return XL_MIN + (clamped / ADC_MAX) * (XL_MAX - XL_MIN)
