@@ -140,7 +140,7 @@ def run_rl_tuning(
     xl: float,
     v1_init: float,
     v2_init: float,
-    max_steps: int = 70,
+    max_steps: int = 140,
     success_vswr: float = 1.20,
 ) -> dict[str, Any]:
     """Run greedy RL agent rollout in Python simulation with cycle avoidance.
@@ -159,7 +159,7 @@ def run_rl_tuning(
         xl: Load reactance in Ohms.
         v1_init: Initial V1 bias voltage in Volts.
         v2_init: Initial V2 bias voltage in Volts.
-        max_steps: Maximum action iterations (must be >= 1, default: 70).
+        max_steps: Maximum action iterations (must be >= 1, default: 140).
         success_vswr: Target VSWR threshold for early termination.
 
     Returns:
@@ -377,8 +377,8 @@ def main() -> int:
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=70,
-        help="Maximum RL rollout steps per tuning cycle (default: 70).",
+        default=140,
+        help="Maximum RL rollout steps per tuning cycle (default: 140).",
     )
     parser.add_argument(
         "--model",
