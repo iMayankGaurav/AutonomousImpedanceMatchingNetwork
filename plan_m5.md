@@ -59,6 +59,8 @@ sim = compute(RL=rl, XL=xl, V1=v1, V2=v2)
 ---
 
 ### 1.3 Reinforcement Learning Autonomous Tuning (M4 ↔ M5)
+*Updated to match the latest implementation in `scripts/live_matching_monitor.py`.*
+
 | Parameter | Value | Source | Purpose |
 |---|---|---|---|
 | `MODEL_PATH` | `models/model.pt` | Project root | Frozen Double DQN checkpoint |
@@ -69,8 +71,10 @@ sim = compute(RL=rl, XL=xl, V1=v1, V2=v2)
 | `INPUT_SCALE` | `[1.0, 1.0, 1.65, 1.65]` | `online_net.input_scale` | Internal PyTorch normalization buffer |
 | `TARGET_VSWR` | `1.20` | Project specification | Matching success threshold |
 | `ACCEPTABLE_VSWR` | `1.50` | Project specification | Secondary matchable threshold |
-| `MAX_STEPS_DEFAULT` | `70` | `scripts/live_matching_monitor.py` | Required budget to span Manhattan distance ($R_L=16\text{--}17\,\Omega$) |
-| `CYCLE_MEMORY` | `8` | `scripts/live_matching_monitor.py` | Recent states tracked for limit-cycle detection |
+| `MAX_STEPS_DEFAULT` | `140` | `scripts/live_matching_monitor.py` | Full exploration budget (matches M4 evaluation horizon) |
+| `CYCLE_MEMORY` | `8` | `scripts/live_matching_monitor.py` | Recent states tracked for 2-state oscillation detection |
+| `BOUNDARY_FALLBACK` | `Enabled` | `scripts/live_matching_monitor.py` | Try alternative unvisited action if it strictly lowers VSWR |
+| `BEST_SO_FAR_RETENTION` | `Enabled` | `scripts/live_matching_monitor.py` | Retains lowest VSWR state encountered across rollout |
 
 ---
 
@@ -97,16 +101,16 @@ flowchart TD
         Worker["Telemetry Pipeline Worker Thread"]
         ModeCheck{"Mode Toggle:\nManual vs Auto (RL)"}
         ManualProc["Manual Mode:\nV1 = V1_man\nV2 = V2_man"]
-        AutoProc["Auto (RL) Mode:\nRun run_rl_tuning()\nwith Cycle Escape"]
+        AutoProc["Auto (RL) Mode:\nRun run_rl_tuning(max_steps=140)\nwith Cycle Escape & Boundary Fallback"]
         PhysCompute["M3: physics.pi_network.compute()\nZin, Gamma, VSWR"]
         OracleSearch["M3: grid_search_match()\nOptimal V1*, V2*, VSWR*"]
     end
 
     subgraph Dashboard["app/dashboard.py (Streamlit)"]
-        Sidebar["Sidebar Controls:\n• Mode (Manual / Auto)\n• Source (Serial / Mock)\n• V_init option\n• Horizon Steps"]
-        KPIs["KPI Metrics:\nVSWR, |Gamma|, RL (dB), Zin"]
+        Sidebar["Sidebar Controls:\n• Mode (Manual / Auto)\n• Source (Serial / Mock)\n• V_init (Pots / Center)\n• Horizon Steps (default 140)"]
+        KPIs["KPI Metrics:\nVSWR, |Gamma|, RL (dB), Zin, Match Badge"]
         SmithView["Smith Chart View:\n(app/smith_plot.py)"]
-        TraceTable["Tuning Trace Table:\nV1, V2, Steps, Errors"]
+        TraceTable["Tuning Trace Table:\nV1, V2, Steps, Cycles, Recovery"]
         HistoryPlot["Live Time-Series:\nVSWR & Voltages"]
     end
 
@@ -136,15 +140,17 @@ The pipeline is the thread-safe bridge connecting telemetry (M2), physics (M3), 
    - Extract raw potentiometer voltages $V_{1,\text{man}}, V_{2,\text{man}}$.
    - Compute RF state via `compute(RL, XL, V1_man, V2_man)`.
 4. In **Auto (RL) Mode**:
-   - Starting from manual voltages (or nominal $1.65\,\text{V}$), execute the RL tuning rollout.
-   - **Crucial:** Implement the cycle-escape mechanism from `scripts/live_matching_monitor.py` to prevent 2-state oscillation traps near $R_L = 16\text{--}17\,\Omega$.
-   - Retain the best-so-far state $(V_1^{\text{best}}, V_2^{\text{best}}, \text{VSWR}^{\text{best}})$.
+   - Starting from manual voltages (or nominal $1.65\,\text{V}$), execute the RL tuning rollout up to `max_steps = 140`.
+   - **Limit-Cycle Escape:** Detect when candidate move repeats a visited state (or oscillates across recent 8 states), evaluate alternative non-cycling actions via physics, and pick the one with lowest next-state VSWR.
+   - **Boundary-Hit Recovery:** When candidate move hits a boundary rail ($0.0\,\text{V}$ or $3.3\,\text{V}$), attempt an alternative unvisited legal move if and only if it strictly lowers VSWR.
+   - **Best-So-Far Retention:** Always return $(V_1^{\text{best}}, V_2^{\text{best}}, \text{VSWR}^{\text{best}})$, tracking both terminal and optimal points.
 5. Run `grid_search_match(RL, XL, grid_size=34)` to generate ground-truth baseline comparisons.
 6. Provide a thread-safe `get_snapshot()` method returning an immutable dictionary.
 
-#### Core Python Interface for `app/pipeline.py`
+#### Core Python Implementation for `app/pipeline.py`
 ```python
 from __future__ import annotations
+from collections import deque
 import threading
 import time
 from typing import Any, Optional
@@ -157,96 +163,169 @@ from physics.pi_network import compute, grid_search_match
 from rl.agent import load_agent, InferenceAgent
 from rl.env import _clamp_voltage
 
-class TelemetryPipeline:
-    def __init__(
-        self,
-        model_path: str = "models/model.pt",
-        use_mock: bool = False,
-        port: Optional[str] = None,
-        max_steps: int = 70,
-        success_vswr: float = 1.20,
-    ) -> None:
-        self.lock = threading.Lock()
-        self.mode = "manual"  # "manual" or "auto"
-        self.v_init_mode = "telemetry"  # "telemetry" or "center"
-        self.max_steps = max_steps
-        self.success_vswr = success_vswr
-        self.agent: InferenceAgent = load_agent(model_path, device="cpu")
-        self.source = MockSource() if use_mock else SerialReader(port=port or detect_serial_port())
-        self.source.start()
-        # Ring buffer for history charts
-        self.history = []
+def apply_voltage_action(v1: float, v2: float, action: int) -> tuple[float, float]:
+    """Return clamped candidate (V1, V2) after applying discrete action 0..4."""
+    if action == 0:
+        return _clamp_voltage(v1 + config.V_STEP), v2
+    if action == 1:
+        return _clamp_voltage(v1 - config.V_STEP), v2
+    if action == 2:
+        return v1, _clamp_voltage(v2 + config.V_STEP)
+    if action == 3:
+        return v1, _clamp_voltage(v2 - config.V_STEP)
+    return v1, v2
 
-    def set_mode(self, mode: str) -> None:
-        with self.lock:
-            self.mode = mode.lower()
+def select_cycle_escape_action(
+    rl: float,
+    xl: float,
+    v1: float,
+    v2: float,
+    blocked_action: int,
+    visited_states: set[tuple[float, float]],
+) -> Optional[tuple[int, float, float, dict[str, Any]]]:
+    """Evaluate non-cycling moving actions via physics and pick lowest next-state VSWR."""
+    candidates = []
+    for alt_action in (0, 1, 2, 3):
+        if alt_action == blocked_action:
+            continue
+        cand_v1, cand_v2 = apply_voltage_action(v1, v2, alt_action)
+        if (cand_v1 == v1 and cand_v2 == v2) or (cand_v1, cand_v2) in visited_states:
+            continue
+        cand_sim = compute(rl, xl, cand_v1, cand_v2)
+        candidates.append((float(cand_sim["vswr"]), alt_action, cand_v1, cand_v2, cand_sim))
 
-    def get_snapshot(self) -> dict[str, Any]:
-        with self.lock:
-            # Poll latest data from source
-            raw = self.source.get_latest()
-            rl, xl = float(raw["RL"]), float(raw["XL"])
-            v1_man, v2_man = float(raw["V1_man"]), float(raw["V2_man"])
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    _, best_action, best_v1, best_v2, best_sim = candidates[0]
+    return best_action, best_v1, best_v2, best_sim
 
-            # Theoretical optimum
-            oracle = grid_search_match(rl, xl, grid_size=34)
+def run_rl_tuning(
+    agent: InferenceAgent,
+    rl: float,
+    xl: float,
+    v1_init: float,
+    v2_init: float,
+    max_steps: int = 140,
+    success_vswr: float = 1.20,
+) -> dict[str, Any]:
+    """Run greedy RL rollout with cycle avoidance, boundary recovery, and best-so-far retention."""
+    v1 = _clamp_voltage(v1_init)
+    v2 = _clamp_voltage(v2_init)
+    cur_sim = compute(rl, xl, v1, v2)
+    initial_vswr = float(cur_sim["vswr"])
 
-            if self.mode == "manual":
-                sim = compute(rl, xl, v1_man, v2_man)
-                return {
-                    "mode": "manual",
-                    "RL": rl, "XL": xl,
-                    "V1": v1_man, "V2": v2_man,
-                    "Zin": sim["Zin"],
-                    "gamma": sim["gamma"],
-                    "gamma_abs": sim["gamma_abs"],
-                    "vswr": sim["vswr"],
-                    "oracle": oracle,
-                    "steps": 0,
-                    "matched": sim["vswr"] < self.success_vswr,
-                }
+    best_v1, best_v2, best_sim = v1, v2, cur_sim
+    visited_states: set[tuple[float, float]] = {(v1, v2)}
+    recent_states: deque[tuple[float, float]] = deque([(v1, v2)], maxlen=8)
+    cycle_detected = False
+    two_state_cycle_detected = False
+    boundary_fallback_attempted = False
+    boundary_fallback_succeeded = False
+    steps_taken = 0
+    stop_reason = "max_steps"
+    trajectory: list[dict[str, Any]] = []
+
+    for _ in range(max_steps):
+        vswr = float(cur_sim["vswr"])
+        gamma = cur_sim["gamma"]
+        trajectory.append({"V1": v1, "V2": v2, "gamma": gamma, "vswr": vswr})
+
+        if vswr < success_vswr:
+            stop_reason = "target_reached"
+            break
+
+        obs = np.array([gamma.real, gamma.imag, v1, v2], dtype=np.float32)
+        action = int(agent.act(obs))
+        if action == 4:
+            stop_reason = "hold"
+            break
+
+        cand_v1, cand_v2 = apply_voltage_action(v1, v2, action)
+
+        # 1. Boundary-hit recovery: try alternative legal move only if it strictly lowers VSWR
+        if cand_v1 == v1 and cand_v2 == v2:
+            boundary_fallback_attempted = True
+            escape = select_cycle_escape_action(
+                rl=rl, xl=xl, v1=v1, v2=v2, blocked_action=action, visited_states=visited_states
+            )
+            if escape is not None and float(escape[3]["vswr"]) < vswr:
+                boundary_fallback_succeeded = True
+                _, next_v1, next_v2, next_sim = escape
             else:
-                # Auto (RL) Mode with Cycle Escape
-                v1_start = v1_man if self.v_init_mode == "telemetry" else 1.65
-                v2_start = v2_man if self.v_init_mode == "telemetry" else 1.65
-                rl_res = self._run_rl_rollout(rl, xl, v1_start, v2_start)
-                return {
-                    "mode": "auto",
-                    "RL": rl, "XL": xl,
-                    "V1": rl_res["v1"], "V2": rl_res["v2"],
-                    "V1_init": v1_start, "V2_init": v2_start,
-                    "Zin": rl_res["sim"]["Zin"],
-                    "gamma": rl_res["sim"]["gamma"],
-                    "gamma_abs": rl_res["sim"]["gamma_abs"],
-                    "vswr": rl_res["sim"]["vswr"],
-                    "oracle": oracle,
-                    "steps": rl_res["steps"],
-                    "matched": rl_res["sim"]["vswr"] < self.success_vswr,
-                    "trajectory": rl_res["trajectory"],
-                }
+                stop_reason = "boundary_hit"
+                break
+        # 2. Limit cycle detection & escape
+        elif (cand_v1, cand_v2) in visited_states:
+            cycle_detected = True
+            if len(recent_states) >= 2 and (cand_v1, cand_v2) == recent_states[-2]:
+                two_state_cycle_detected = True
+            escape = select_cycle_escape_action(
+                rl=rl, xl=xl, v1=v1, v2=v2, blocked_action=action, visited_states=visited_states
+            )
+            if escape is None:
+                stop_reason = "cycle_unbreakable"
+                break
+            _, next_v1, next_v2, next_sim = escape
+        else:
+            next_v1, next_v2 = cand_v1, cand_v2
+            next_sim = compute(rl, xl, next_v1, next_v2)
+
+        steps_taken += 1
+        v1, v2, cur_sim = next_v1, next_v2, next_sim
+        visited_states.add((v1, v2))
+        recent_states.append((v1, v2))
+
+        if float(cur_sim["vswr"]) < float(best_sim["vswr"]):
+            best_v1, best_v2, best_sim = v1, v2, cur_sim
+    else:
+        stop_reason = "target_reached" if float(cur_sim["vswr"]) < success_vswr else "max_steps"
+
+    cycle_escaped = bool(cycle_detected and stop_reason != "cycle_unbreakable")
+    return {
+        "v1": float(best_v1),
+        "v2": float(best_v2),
+        "vswr": float(best_sim["vswr"]),
+        "gamma": best_sim["gamma"],
+        "gamma_abs": float(best_sim["gamma_abs"]),
+        "initial_vswr": initial_vswr,
+        "final_v1": float(v1),
+        "final_v2": float(v2),
+        "final_vswr": float(cur_sim["vswr"]),
+        "steps": steps_taken,
+        "cycle_detected": cycle_detected,
+        "cycle_escaped": cycle_escaped,
+        "two_state_cycle_detected": two_state_cycle_detected,
+        "boundary_fallback_attempted": boundary_fallback_attempted,
+        "boundary_fallback_succeeded": boundary_fallback_succeeded,
+        "stop_reason": stop_reason,
+        "trajectory": trajectory,
+    }
 ```
 
 ---
 
 ### 3.2 `app/smith_plot.py` (Smith Chart Rendering Engine)
 
-Uses pure Matplotlib and the conformal bilinear transformations from [`physics/smith.py`](./physics/smith.py).
+Uses pure Matplotlib and conformal bilinear transformations from [`physics/smith.py`](./physics/smith.py).
 
 #### Responsibilities
 1. Render standard Smith chart impedance grid:
    - Constant normalized resistance circles: $r \in [0.2, 0.5, 1.0, 2.0, 5.0]$.
    - Constant normalized reactance arcs: $x \in [\pm 0.2, \pm 0.5, \pm 1.0, \pm 2.0]$.
-   - Unit outer boundary ($|\Gamma| = 1.0$).
+   - Outer unit circle boundary ($|\Gamma| = 1.0$).
 2. Draw the **Target VSWR Circle** centered at origin with radius $R = \frac{1.20 - 1}{1.20 + 1} \approx 0.0909$ (green dashed line).
 3. Plot the **Active Reflection Dot** $(\operatorname{Re}(\Gamma), \operatorname{Im}(\Gamma))$:
    - Green dot when $\text{VSWR} \le 1.20$.
    - Yellow dot when $1.20 < \text{VSWR} \le 1.50$.
    - Red dot when $\text{VSWR} > 1.50$.
-4. Plot the **Physics Optimal Target** $(\operatorname{Re}(\Gamma^*), \operatorname{Im}(\Gamma^*))$ as a star marker.
-5. Draw a historical breadcrumb trail (fade-out line or dotted markers) showing the last 20 steps or the active RL tuning trajectory.
+4. Plot the **Physics Optimal Target** $(\operatorname{Re}(\Gamma^*), \operatorname{Im}(\Gamma^*))$ as a gold star marker.
+5. Draw a historical breadcrumb trail (fade-out line or dotted markers) showing the last 20 steps or active RL tuning path.
 
-#### Core Python Interface for `app/smith_plot.py`
+#### Core Python Implementation for `app/smith_plot.py`
 ```python
+import matplotlib
+matplotlib.use("Agg")  # Non-interactive backend for Streamlit safety
 import matplotlib.pyplot as plt
 import numpy as np
 from physics.smith import resistance_circle, reactance_arc, vswr_circle
@@ -307,21 +386,26 @@ def draw_smith_chart(
 - **Sidebar:**
   - **Mode Toggle:** `Manual (Potentiometers)` vs `Autonomous (RL Agent)`.
   - **Data Source:** `Real Hardware (Auto COM / Selected Port)` vs `Mock Simulation`.
-  - **RL Settings:** Initial voltage mode (`From Pots` vs `Center 1.65V`), Rollout Horizon (`max_steps`, default 70).
+  - **RL Settings:**
+    - Initial voltage mode: `From Pots` vs `Center 1.65V`.
+    - Rollout Horizon: `max_steps` slider (default **`140`**, range 35 to 200).
   - **Display Settings:** Refresh interval (default 0.25 s = 4 Hz).
 - **KPI Metrics Strip (Top Row):**
   - **VSWR:** Colored green ($<1.20$), yellow ($1.20\text{--}1.50$), or red ($>1.50$).
   - **$|\Gamma|$:** Absolute reflection coefficient.
   - **Return Loss:** $\text{RL}_{\text{dB}} = -20\log_{10}|\Gamma|$.
   - **$Z_{\text{in}}$:** $R_{\text{in}} + jX_{\text{in}}\,\Omega$.
-  - **Match Status Badge:** `MATCHED` / `SUBOPTIMAL` / `TUNING`.
+  - **Match Status Badge:**
+    - `MATCHED` (Strict $\text{VSWR} < 1.20$).
+    - `DIFF. LOAD (NEAR-OPT)` ($\text{VSWR}^* \ge 1.50$ and within $0.15$ of optimum).
+    - `SUBOPTIMAL` ($\text{VSWR} \ge 1.20$).
 - **Center Main View (Split 2-Column):**
   - **Left Column:** Live Smith Chart figure.
   - **Right Column:**
-    - Physical Telemetry: $R_L, X_L$ gauge / progress bars.
-    - Active Voltages: $V_1, V_2$ indicators with physical vs RL comparison.
-    - Ground Truth Benchmark: Optimal $V_1^*, V_2^*, \text{VSWR}^*$ and Suboptimality Gap.
-    - Tuning Steps Counter & Status.
+    - Physical Telemetry: $R_L, X_L$ gauge / numerical displays.
+    - Active Voltages: $V_1, V_2$ indicators with manual vs RL comparison.
+    - Ground Truth Benchmark: Optimal $V_1^*, V_2^*, \text{VSWR}^*$ and Suboptimality Gap $\Delta\text{VSWR}$.
+    - Diagnostic Badges: Cycle Escaped, Boundary Fallback Succeeded, Steps Taken.
 - **Bottom Panel:**
   - Real-time strip charts: VSWR vs Time and Varactor Voltages ($V_1, V_2$) vs Time.
 
@@ -341,14 +425,14 @@ sequenceDiagram
 
     Presenter->>Dashboard: Start in Manual Mode (Pots)
     Dashboard-->>Presenter: Displays dot near center (VSWR ≈ 1.1)
-    Presenter->>Hardware: Twist Pots 1 & 2 (RL -> 16.5 Ω, XL -> 75 Ω)
+    Presenter->>Hardware: Twist Pots 1 & 2 (RL -> 16.9 Ω, XL -> 75.6 Ω)
     Hardware->>Dashboard: Telemetry stream updates
     Dashboard-->>Presenter: VSWR spikes to ~9.8 (Red mismatch dot)
     Presenter->>Hardware: Attempt manual tuning via Pots 3 & 4
     Dashboard-->>Presenter: Non-linear coupling makes manual tuning sluggish/difficult
     Presenter->>Dashboard: Flip Mode Toggle to "Auto (RL)"
-    Dashboard->>RL: Request autonomous tuning rollout (max_steps=70)
-    RL-->>Dashboard: Output V1=1.95V, V2=3.25V in 38 steps
+    Dashboard->>RL: Request autonomous tuning rollout (max_steps=140)
+    RL-->>Dashboard: Output V1=2.00V, V2=3.25V in 39 steps
     Dashboard-->>Presenter: Dot snaps into green circle (VSWR drops to 1.19)
     Presenter->>Hardware: Twist Pots 1 & 2 again live
     Dashboard->>RL: Continuously tracks and re-tunes to maintain VSWR < 1.2
@@ -363,10 +447,12 @@ Before declaring Module 5 complete, execute this checklist:
 - [ ] **Contract Verification:**
   - Verify `app/pipeline.py` imports `io.serial_reader.get_latest` without errors.
   - Verify `app/pipeline.py` loads `models/model.pt` via `rl.agent.load_agent`.
-  - Verify `app/smith_plot.py` draws without importing Matplotlib interactive backends (`matplotlib.use('Agg')` or clean figure generation).
-- [ ] **Horizon & Cycle Prevention:**
-  - Confirm `max_steps` is set to $\ge 70$ (not 35) to ensure high-resistance loads ($R_L \ge 16\,\Omega$) converge.
-  - Confirm cycle-escape logic is present to handle the 2-state boundary limit cycle.
+  - Verify `app/smith_plot.py` draws with `matplotlib.use('Agg')` without window popups.
+- [ ] **Horizon & Recovery Verification:**
+  - Confirm `max_steps` defaults to **`140`** (matching M4 evaluation horizon and `live_matching_monitor.py`).
+  - Confirm cycle-escape logic is present to break 2-state boundary limit cycles near $R_L = 16\text{--}17\,\Omega$.
+  - Confirm boundary-hit fallback recovery is present when an action hits $0.0\,\text{V}$ or $3.3\,\text{V}$.
+  - Confirm best-so-far voltage retention is active.
 - [ ] **Hardware Disconnection Resilience:**
   - Start dashboard with STM32 connected.
   - Unplug USB cable; confirm the dashboard displays "Reconnecting..." or cleanly falls back to Mock without crashing.
