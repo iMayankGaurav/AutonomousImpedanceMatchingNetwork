@@ -181,6 +181,8 @@ def run_rl_tuning(
     cycle_detected = False
     two_state_cycle_detected = False
     cycle_events = 0
+    boundary_fallback_attempted = False
+    boundary_fallback_succeeded = False
     steps_taken = 0
     stop_reason = "max_steps"
     t0 = time.perf_counter()
@@ -204,13 +206,25 @@ def run_rl_tuning(
 
         cand_v1, cand_v2 = _apply_voltage_action(v1, v2, action)
 
-        # Preserve boundary-limit handling
+        # Boundary-hit recovery: try an unvisited legal move only if it strictly lowers VSWR.
         if cand_v1 == v1 and cand_v2 == v2:
-            stop_reason = "boundary_hit"
-            break
-
+            boundary_fallback_attempted = True
+            escape = _select_cycle_escape_action(
+                rl=rl,
+                xl=xl,
+                v1=v1,
+                v2=v2,
+                blocked_action=action,
+                visited_states=visited_states,
+            )
+            if escape is not None and float(escape[3]["vswr"]) < vswr:
+                boundary_fallback_succeeded = True
+                _, next_v1, next_v2, next_sim = escape
+            else:
+                stop_reason = "boundary_hit"
+                break
         # Detect limit cycle / short oscillation before repeating a visited state
-        if (cand_v1, cand_v2) in visited_states:
+        elif (cand_v1, cand_v2) in visited_states:
             cycle_detected = True
             cycle_events += 1
             if len(recent_states) >= 2 and (cand_v1, cand_v2) == recent_states[-2]:
@@ -246,6 +260,7 @@ def run_rl_tuning(
             else "max_steps"
         )
 
+    cycle_escaped = bool(cycle_detected and stop_reason != "cycle_unbreakable")
     t_eval_ms = (time.perf_counter() - t0) * 1000.0
     return {
         "v1": float(best_v1),
@@ -266,8 +281,11 @@ def run_rl_tuning(
         "best_gamma": best_sim["gamma"],
         "steps": steps_taken,
         "cycle_detected": cycle_detected,
+        "cycle_escaped": cycle_escaped,
         "two_state_cycle_detected": two_state_cycle_detected,
         "cycle_events": cycle_events,
+        "boundary_fallback_attempted": boundary_fallback_attempted,
+        "boundary_fallback_succeeded": boundary_fallback_succeeded,
         "stop_reason": stop_reason,
         "eval_ms": t_eval_ms,
     }
@@ -433,8 +451,12 @@ def main() -> int:
 
     # Metrics aggregation
     frame_count = 0
-    success_count = 0
-    cycle_frames = 0
+    strict_match_count = 0
+    near_optimal_count = 0
+    cycle_detected_count = 0
+    cycle_escaped_count = 0
+    boundary_fallback_attempt_count = 0
+    boundary_fallback_success_count = 0
     total_vswr_gap = 0.0
     total_init_vswr = 0.0
     total_final_vswr = 0.0
@@ -487,27 +509,34 @@ def main() -> int:
             vswr_init = float(rl_res["initial_vswr"])
             steps = int(rl_res["steps"])
             cycle_detected = bool(rl_res["cycle_detected"])
+            cycle_escaped = bool(rl_res["cycle_escaped"])
 
             # 5. Accuracy & Error Calculations (evaluated on returned best-so-far state)
             dv1 = abs(v1_rl - v1_opt)
             dv2 = abs(v2_rl - v2_opt)
             vswr_gap = max(0.0, vswr_best - vswr_opt)
 
-            # Match status categorization
+            # Match status categorization (strict < 1.20 kept separate from near-optimal)
             if vswr_best < 1.20:
                 status_str = _pad_color("MATCHED", 11, green)
-                success_count += 1
+                strict_match_count += 1
             elif vswr_opt >= 1.5:
                 status_str = _pad_color("DIFF. LOAD", 11, yellow)
                 if abs(vswr_best - vswr_opt) < 0.15:
-                    success_count += 1
+                    near_optimal_count += 1
             else:
                 status_str = _pad_color("SUBOPTIMAL", 11, red)
 
             # Running metrics
             frame_count += 1
             if cycle_detected:
-                cycle_frames += 1
+                cycle_detected_count += 1
+            if cycle_escaped:
+                cycle_escaped_count += 1
+            if rl_res["boundary_fallback_attempted"]:
+                boundary_fallback_attempt_count += 1
+            if rl_res["boundary_fallback_succeeded"]:
+                boundary_fallback_success_count += 1
             total_v1_err += dv1
             total_v2_err += dv2
             total_vswr_gap += vswr_gap
@@ -551,14 +580,22 @@ def main() -> int:
         avg_final_vswr = total_final_vswr / frame_count
         avg_best_vswr = total_best_vswr / frame_count
         avg_steps = total_rl_steps / frame_count
-        match_rate = (success_count / frame_count) * 100.0
-        cycle_rate = (cycle_frames / frame_count) * 100.0
+        strict_match_rate = (strict_match_count / frame_count) * 100.0
+        near_optimal_rate = (near_optimal_count / frame_count) * 100.0
+        cycle_detected_rate = (cycle_detected_count / frame_count) * 100.0
 
         print("\n" + bold("=" * 112))
         print(bold("                                  EVALUATION ACCURACY SUMMARY"))
         print(bold("=" * 112))
         print(f"  Total Frames Evaluated     : {bold(str(frame_count))} (max_steps={args.max_steps})")
-        print(f"  Match Success Rate         : {green(f'{match_rate:.1f}%')} (best-so-far VSWR < 1.20 or near-optimal)")
+        print(
+            f"  Strict Match Rate (< 1.20) : {green(f'{strict_match_rate:.1f}%')} "
+            f"({strict_match_count}/{frame_count}, unrounded best-so-far VSWR < 1.20)"
+        )
+        print(
+            f"  Difficult-Load Near-Opt    : {yellow(f'{near_optimal_rate:.1f}%')} "
+            f"({near_optimal_count}/{frame_count}, VSWR* >= 1.5 and |VSWR_best - VSWR*| < 0.15)"
+        )
         print(f"  Average Mean Voltage Error : ΔV1 = {cyan(f'{avg_v1_err:.3f} V')}, ΔV2 = {cyan(f'{avg_v2_err:.3f} V')}")
         print(
             f"  Average VSWR Progression   : Initial = {cyan(f'{avg_init_vswr:.4f}')}, "
@@ -566,7 +603,12 @@ def main() -> int:
         )
         print(f"  Average Suboptimality Gap  : {cyan(f'{avg_vswr_gap:.4f}')} (VSWR_best - VSWR_opt)")
         print(f"  Average RL Action Steps    : {cyan(f'{avg_steps:.1f}')} steps per tuning cycle")
-        print(f"  Cycles Detected & Escaped  : {cyan(f'{cycle_frames}/{frame_count} ({cycle_rate:.1f}%)')}")
+        print(
+            f"  Cycles Detected / Escaped  : {cyan(f'{cycle_detected_count}/{frame_count} ({cycle_detected_rate:.1f}%) detected, {cycle_escaped_count}/{cycle_detected_count} escaped')}"
+        )
+        print(
+            f"  Boundary Fallbacks         : {cyan(f'{boundary_fallback_attempt_count} attempted, {boundary_fallback_success_count} succeeded')}"
+        )
         print("  Control Mode Note          : Tuning runs purely in Python simulation (voltages are not sent to STM32).")
         print("=" * 112 + "\n")
 
