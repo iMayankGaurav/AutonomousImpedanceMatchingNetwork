@@ -1,0 +1,136 @@
+{
+  "metadata": {
+    "timestamp": "2026-11-12 13:28:33",
+    "model_path": "C:\\Users\\sidd\\Documents\\AutonomousImpedanceMatchingNetwork\\models\\model.pt",
+    "total_loads": 100,
+    "seed": 42,
+    "bands": [
+      "10-12 \u03a9",
+      "12-14 \u03a9",
+      "14-16 \u03a9",
+      "16-17 \u03a9"
+    ]
+  },
+  "band_performance": {
+    "10-12 \u03a9": {
+      "num_loads": 25,
+      "success_rate_at_35_steps": 80.0,
+      "success_rate_at_100_steps": 100.0,
+      "mean_vswr_at_35_steps": 1.2029,
+      "mean_vswr_at_100_steps": 1.1615,
+      "mean_optimality_gap_at_100_steps": 0.1174,
+      "mean_theoretical_manhattan_steps": 33.7,
+      "mean_actual_steps_taken": 28.0,
+      "truncation_failures_at_35": 5,
+      "oscillation_failures": 0
+    },
+    "12-14 \u03a9": {
+      "num_loads": 25,
+      "success_rate_at_35_steps": 96.0,
+      "success_rate_at_100_steps": 100.0,
+      "mean_vswr_at_35_steps": 1.1726,
+      "mean_vswr_at_100_steps": 1.1689,
+      "mean_optimality_gap_at_100_steps": 0.1406,
+      "mean_theoretical_manhattan_steps": 35.4,
+      "mean_actual_steps_taken": 27.6,
+      "truncation_failures_at_35": 1,
+      "oscillation_failures": 0
+    },
+    "14-16 \u03a9": {
+      "num_loads": 25,
+      "success_rate_at_35_steps": 84.0,
+      "success_rate_at_100_steps": 96.0,
+      "mean_vswr_at_35_steps": 1.1932,
+      "mean_vswr_at_100_steps": 1.1826,
+      "mean_optimality_gap_at_100_steps": 0.1403,
+      "mean_theoretical_manhattan_steps": 44.1,
+      "mean_actual_steps_taken": 33.4,
+      "truncation_failures_at_35": 3,
+      "oscillation_failures": 1
+    },
+    "16-17 \u03a9": {
+      "num_loads": 25,
+      "success_rate_at_35_steps": 4.0,
+      "success_rate_at_100_steps": 92.0,
+      "mean_vswr_at_35_steps": 1.2697,
+      "mean_vswr_at_100_steps": 1.1918,
+      "mean_optimality_gap_at_100_steps": 0.1309,
+      "mean_theoretical_manhattan_steps": 51.5,
+      "mean_actual_steps_taken": 40.8,
+      "truncation_failures_at_35": 22,
+      "oscillation_failures": 2
+    }
+  },
+  "worst_loads": [
+    {
+      "rl": 16.9378,
+      "xl": 70.5759,
+      "band": "16-17 \u03a9",
+      "opt_v1": 2.8499999999999996,
+      "opt_v2": 3.15,
+      "opt_vswr": 1.002,
+      "dqn_v1": 2.2,
+      "dqn_v2": 3.05,
+      "dqn_vswr": 1.199,
+      "vswr_gap": 0.198,
+      "steps": 39,
+      "failure_mode_35": "Step Truncation (Needed >35 steps)"
+    },
+    {
+      "rl": 16.1086,
+      "xl": 72.0836,
+      "band": "16-17 \u03a9",
+      "opt_v1": 2.4499999999999997,
+      "opt_v2": 3.1999999999999997,
+      "opt_vswr": 1.005,
+      "dqn_v1": 1.95,
+      "dqn_v2": 3.1,
+      "dqn_vswr": 1.197,
+      "vswr_gap": 0.192,
+      "steps": 35,
+      "failure_mode_35": "None (Matched)"
+    },
+    {
+      "rl": 13.1184,
+      "xl": 66.5593,
+      "band": "12-14 \u03a9",
+      "opt_v1": 2.3,
+      "opt_v2": 2.8499999999999996,
+      "opt_vswr": 1.005,
+      "dqn_v1": 1.7,
+      "dqn_v2": 2.85,
+      "dqn_vswr": 1.196,
+      "vswr_gap": 0.191,
+      "steps": 25,
+      "failure_mode_35": "None (Matched)"
+    },
+    {
+      "rl": 14.8923,
+      "xl": 67.7153,
+      "band": "14-16 \u03a9",
+      "opt_v1": 2.65,
+      "opt_v2": 2.9499999999999997,
+      "opt_vswr": 1.006,
+      "dqn_v1": 2.0,
+      "dqn_v2": 2.9,
+      "dqn_vswr": 1.197,
+      "vswr_gap": 0.19,
+      "steps": 32,
+      "failure_mode_35": "None (Matched)"
+    },
+    {
+      "rl": 14.7236,
+      "xl": 63.3147,
+      "band": "14-16 \u03a9",
+      "opt_v1": 3.3,
+      "opt_v2": 2.7499999999999996,
+      "opt_vswr": 1.007,
+      "dqn_v1": 2.4,
+      "dqn_v2": 2.75,
+      "dqn_vswr": 1.196,
+      "vswr_gap": 0.189,
+      "steps": 37,
+      "failure_mode_35": "Step Truncation (Needed >35 steps)"
+    }
+  ]
+}
