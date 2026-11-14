@@ -3,6 +3,7 @@
 Hardware-in-the-Loop RF Impedance Matching Interface:
     - Real-time Smith chart with target center (50 Ohm), VSWR boundaries, and trajectory trail
     - Professional engineering aesthetic with zero emojis
+    - High-performance, flicker-free rendering via Streamlit fragments (st.fragment)
     - Interactive 'Manual (Pots)' vs 'Auto (RL)' mode arbitrator
     - Telemetry source selection: STM32 UART Serial stream vs Mock telemetry
     - Live metric telemetry: VSWR, |Gamma|, Return Loss, Zin, ZL, V1/V2, C1/C2
@@ -75,7 +76,7 @@ def get_pipeline() -> PipelineController:
 def main() -> None:
     pipeline = get_pipeline()
 
-    # --- SIDEBAR CONTROLS ---
+    # --- SIDEBAR CONTROLS (Rendered statically, does not flicker) ---
     with st.sidebar:
         st.title("System Controls")
         st.markdown("---")
@@ -128,7 +129,7 @@ def main() -> None:
 
         # 3. Visualization & Performance Settings
         st.subheader("3. Visualization Settings")
-        refresh_rate_hz = st.slider("Refresh Rate (Hz):", min_value=4, max_value=20, value=10, step=1)
+        refresh_rate_hz = st.slider("Refresh Rate (Hz):", min_value=1, max_value=10, value=4, step=1)
         trail_len = st.slider("Trajectory Trail Length:", min_value=5, max_value=60, value=30, step=5)
         pipeline.trail_max_len = trail_len
         pipeline._trail = collections.deque(pipeline._trail, maxlen=trail_len)
@@ -162,7 +163,7 @@ def main() -> None:
                 "t": time.time(),
             }
 
-    # --- MAIN PAGE HEADER ---
+    # --- MAIN PAGE HEADER (Rendered statically, zero flicker) ---
     st.markdown(
         """
         <div style="background: #1e293b; padding: 18px 24px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #0284c7;">
@@ -177,28 +178,27 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # Placeholder containers for smooth updating
-    kpi_container = st.empty()
-    center_container = st.empty()
-    diagnostics_container = st.empty()
+    # Calculate refresh interval in seconds for fragment execution
+    refresh_interval_sec = (1.0 / float(refresh_rate_hz)) if st.session_state.stream_active else None
 
-    # Step the pipeline once per render cycle
-    snapshot: PipelineSnapshot = pipeline.step(
-        override_data=override_data,
-        auto_full_rollout=True,
-    )
+    # --- DYNAMIC LIVE FRAGMENT (Only this section updates, eliminating flicker) ---
+    @st.fragment(run_every=refresh_interval_sec)
+    def render_live_telemetry_dashboard() -> None:
+        # Step the pipeline once per render cycle
+        snapshot: PipelineSnapshot = pipeline.step(
+            override_data=override_data,
+            auto_full_rollout=True,
+        )
 
-    # Record trend history
-    st.session_state.history_vswr.append(snapshot.vswr)
-    st.session_state.history_v1.append(snapshot.V1_active)
-    st.session_state.history_v2.append(snapshot.V2_active)
-    st.session_state.history_t.append(snapshot.timestamp)
+        # Record trend history
+        st.session_state.history_vswr.append(snapshot.vswr)
+        st.session_state.history_v1.append(snapshot.V1_active)
+        st.session_state.history_v2.append(snapshot.V2_active)
+        st.session_state.history_t.append(snapshot.timestamp)
 
-    # --- 1. TOP KPI METRIC CARDS ---
-    with kpi_container.container():
+        # 1. Top KPI Metrics
         k1, k2, k3, k4, k5 = st.columns(5)
 
-        # VSWR card
         vswr_val = snapshot.vswr
         if vswr_val <= 1.20:
             vswr_status = "Optimal Match (VSWR < 1.20)"
@@ -217,14 +217,12 @@ def main() -> None:
             delta_color=delta_color,
         )
 
-        # Reflection Magnitude & Return Loss
         k2.metric(
             label="Reflection |Gamma|",
             value=f"{snapshot.gamma_abs:.3f}",
             delta=f"{snapshot.return_loss_db:.1f} dB RL",
         )
 
-        # Input Impedance Zin
         sign_str = "+" if snapshot.Z_in.imag >= 0 else "-"
         k3.metric(
             label="Input Impedance Zin",
@@ -232,7 +230,6 @@ def main() -> None:
             delta="Target: 50.0 + j0 Ohm",
         )
 
-        # Disturbance Load ZL
         sign_l_str = "+" if snapshot.XL >= 0 else "-"
         k4.metric(
             label="Antenna Load ZL",
@@ -240,15 +237,13 @@ def main() -> None:
             delta="Detuning Disturbance",
         )
 
-        # Active Varactors
         k5.metric(
             label="Varactors (V1 | V2)",
             value=f"{snapshot.V1_active:.2f}V | {snapshot.V2_active:.2f}V",
             delta=f"C1: {snapshot.C1_pF:.1f}pF | C2: {snapshot.C2_pF:.1f}pF",
         )
 
-    # --- 2. CENTER CONTENT (SMITH CHART & TELEMETRY CHARTS) ---
-    with center_container.container():
+        # 2. Main Visual Area (Smith Chart & Real-Time Plots)
         left_col, right_col = st.columns([1.1, 0.9])
 
         with left_col:
@@ -258,7 +253,7 @@ def main() -> None:
                 target_gamma=snapshot.gamma_opt,
                 trail=snapshot.trail,
                 gamma_load=snapshot.gamma_load,
-                figsize=(5.5, 5.5),
+                figsize=(5.2, 5.2),
                 dark_mode=False,
                 show_labels=True,
             )
@@ -290,14 +285,20 @@ def main() -> None:
                 })
                 st.line_chart(df_v, height=170)
 
-            # Agent Action Banner
+            # Agent Action Readout
             if snapshot.mode == "Auto (RL)":
-                st.text(f"DQN Decision: {snapshot.last_action_name} | Cycle Escaped: {snapshot.cycle_escaped} | Boundary Recovered: {snapshot.boundary_recovered}")
+                st.text(
+                    f"DQN Decision: {snapshot.last_action_name} | "
+                    f"Cycle Escaped: {snapshot.cycle_escaped} | "
+                    f"Boundary Recovered: {snapshot.boundary_recovered}"
+                )
             else:
-                st.text(f"Manual Mode: Direct Potentiometer Pass-Through (V1={snapshot.V1_active:.2f}V, V2={snapshot.V2_active:.2f}V)")
+                st.text(
+                    f"Manual Mode: Direct Potentiometer Pass-Through "
+                    f"(V1={snapshot.V1_active:.2f}V, V2={snapshot.V2_active:.2f}V)"
+                )
 
-    # --- 3. SYSTEM DIAGNOSTICS & STATUS PANEL ---
-    with diagnostics_container.container():
+        # 3. System Diagnostics Strip
         st.markdown("---")
         d1, d2, d3, d4, d5 = st.columns(5)
         d1.text(f"Stream: {snapshot.connection_status}")
@@ -306,22 +307,20 @@ def main() -> None:
         d4.text(f"Packets: {snapshot.packet_count}")
         d5.text(f"State: {snapshot.match_status}")
 
-        # Demo Script Walkthrough Expander
-        with st.expander("Demonstration Walkthrough Guide (Section 7)"):
-            st.markdown(
-                """
-                1. **Initial Calibration:** Launch in **Manual (Pots)** mode. Verify the dot sits near the center with nominal load values.
-                2. **Environmental Detuning:** Rotate **Potentiometer 1 (RL)** down to approximately 12 Ohm and **Potentiometer 2 (XL)** up to +75 Ohm. Observe the VSWR jump above 8.0 with the red mismatch indicator.
-                3. **Manual Human Tuning Challenge:** Attempt to steer the dot back to the 50 Ohm center using **Potentiometers 3 and 4**. Note how difficult simultaneous non-linear coupled varactor adjustment is.
-                4. **Autonomous AI Engagement:** Switch the control mode to **Auto (RL)**. The Double DQN agent evaluates reflection state and converges inside the VSWR < 1.20 target ring within moments.
-                5. **Dynamic Continuous Tracking:** Rotate the disturbance pots while in Auto mode to demonstrate how the agent continuously tracks and re-acquires optimal match autonomously.
-                """
-            )
+    # Invoke fragment
+    render_live_telemetry_dashboard()
 
-    # Refresh loop for live animation
-    if st.session_state.stream_active:
-        time.sleep(1.0 / max(1.0, float(refresh_rate_hz)))
-        st.rerun()
+    # --- STATIC DEMONSTRATION WALKTHROUGH (Rendered once, no flashing) ---
+    with st.expander("Demonstration Walkthrough Guide (Section 7)"):
+        st.markdown(
+            """
+            1. **Initial Calibration:** Launch in **Manual (Pots)** mode. Verify the dot sits near the center with nominal load values.
+            2. **Environmental Detuning:** Rotate **Potentiometer 1 (RL)** down to approximately 12 Ohm and **Potentiometer 2 (XL)** up to +75 Ohm. Observe the VSWR jump above 8.0 with the red mismatch indicator.
+            3. **Manual Human Tuning Challenge:** Attempt to steer the dot back to the 50 Ohm center using **Potentiometers 3 and 4**. Note how difficult simultaneous non-linear coupled varactor adjustment is.
+            4. **Autonomous AI Engagement:** Switch the control mode to **Auto (RL)**. The Double DQN agent evaluates reflection state and converges inside the VSWR < 1.20 target ring within moments.
+            5. **Dynamic Continuous Tracking:** Rotate the disturbance pots while in Auto mode to demonstrate how the agent continuously tracks and re-acquires optimal match autonomously.
+            """
+        )
 
 
 if __name__ == "__main__":

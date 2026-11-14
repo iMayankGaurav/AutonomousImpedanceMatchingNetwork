@@ -326,6 +326,11 @@ class PipelineController:
         self._fps: float = 20.0
         self._dt_history: Deque[float] = collections.deque(maxlen=20)
 
+        # Baseline caching
+        self._cached_rl: float = -9999.0
+        self._cached_xl: float = -9999.0
+        self._cached_baseline: Optional[dict[str, Any]] = None
+
         # Initialize data source
         self._init_source()
 
@@ -507,8 +512,17 @@ class PipelineController:
         self.last_update_time = t_sample
         last_update_age = max(0.0, now - t_sample)
 
-        # 2. Physics Ground Truth Optimum (Baseline Benchmark)
-        baseline = grid_search_match(RL, XL, grid_size=34)
+        # 2. Physics Ground Truth Optimum (Cached by disturbance coordinates)
+        if (
+            self._cached_baseline is None
+            or abs(RL - self._cached_rl) > 0.05
+            or abs(XL - self._cached_xl) > 0.05
+        ):
+            self._cached_baseline = grid_search_match(RL, XL, grid_size=34)
+            self._cached_rl = RL
+            self._cached_xl = XL
+
+        baseline = self._cached_baseline
         v1_opt = float(baseline["best_V1"])
         v2_opt = float(baseline["best_V2"])
         vswr_opt = float(baseline["best_vswr"])

@@ -36,13 +36,22 @@ from physics.smith import (
 DEFAULT_R_CIRCLES = [0.2, 0.5, 1.0, 2.0, 5.0]
 DEFAULT_X_ARCS = [0.2, 0.5, 1.0, 2.0, -0.2, -0.5, -1.0, -2.0]
 
+# Precompute static grid coordinates once at module import for high FPS and low latency
+_PRECOMP_R = [(r, resistance_circle(r, num_points=140)) for r in DEFAULT_R_CIRCLES]
+_PRECOMP_X = [(x, reactance_arc(x, num_points=100)) for x in DEFAULT_X_ARCS]
+_PRECOMP_UNIT_THETA = np.linspace(0.0, 2.0 * np.pi, 160)
+_PRECOMP_UNIT_U = np.cos(_PRECOMP_UNIT_THETA)
+_PRECOMP_UNIT_V = np.sin(_PRECOMP_UNIT_THETA)
+_PRECOMP_VSWR_12 = vswr_circle(1.20, num_points=140)
+_PRECOMP_VSWR_15 = vswr_circle(1.50, num_points=140)
+
 
 def draw_smith_chart(
     current_gamma: complex | tuple[float, float],
     target_gamma: Optional[complex | tuple[float, float]] = None,
     trail: Optional[Sequence[complex | tuple[float, float]]] = None,
     gamma_load: Optional[complex | tuple[float, float]] = None,
-    figsize: tuple[float, float] = (5.5, 5.5),
+    figsize: tuple[float, float] = (5.2, 5.2),
     dark_mode: bool = False,
     show_labels: bool = True,
 ) -> plt.Figure:
@@ -59,7 +68,7 @@ def draw_smith_chart(
     gamma_load : complex or tuple of (float, float), optional
         Antenna disturbance load reflection coefficient Gamma_load.
     figsize : tuple of (float, float), optional
-        Figure dimensions in inches (default: (5.5, 5.5)).
+        Figure dimensions in inches (default: (5.2, 5.2)).
     dark_mode : bool, optional
         Whether to style the chart with a dark slate background (default: False).
     show_labels : bool, optional
@@ -95,11 +104,10 @@ def draw_smith_chart(
     ax.set_ylim(-1.14, 1.14)
     ax.axis("off")
 
-    # 1. Background Grid: Constant Resistance Circles (r = R / Z0)
-    for r in DEFAULT_R_CIRCLES:
-        u_r, v_r = resistance_circle(r, num_points=180)
+    # 1. Background Grid: Precomputed Constant Resistance Circles
+    for r, (u_r, v_r) in _PRECOMP_R:
         line_col = r1_color if r == 1.0 else grid_color
-        line_w = 1.3 if r == 1.0 else 0.7
+        line_w = 1.2 if r == 1.0 else 0.7
         line_style = "-" if r == 1.0 else "--"
         ax.plot(u_r, v_r, color=line_col, linewidth=line_w, linestyle=line_style, zorder=2)
 
@@ -116,21 +124,18 @@ def draw_smith_chart(
                 zorder=3,
             )
 
-    # 2. Background Grid: Constant Reactance Arcs (x = X / Z0)
-    for x in DEFAULT_X_ARCS:
-        u_x, v_x = reactance_arc(x, num_points=120)
+    # 2. Background Grid: Precomputed Constant Reactance Arcs
+    for _, (u_x, v_x) in _PRECOMP_X:
         ax.plot(u_x, v_x, color=grid_color, linewidth=0.7, linestyle=":", zorder=2)
 
     # 3. Real Axis (Pure resistance line x = 0)
     ax.axhline(0, color=grid_color, linewidth=0.9, zorder=2)
 
     # 4. Outer Unit Boundary (|Gamma| = 1.0)
-    theta = np.linspace(0.0, 2.0 * np.pi, 200)
-    ax.plot(np.cos(theta), np.sin(theta), color=unit_circle_color, linewidth=1.5, zorder=3)
+    ax.plot(_PRECOMP_UNIT_U, _PRECOMP_UNIT_V, color=unit_circle_color, linewidth=1.5, zorder=3)
 
     # 5. Target Match Circles: VSWR = 1.20 and VSWR = 1.50
-    # Primary target circle: VSWR = 1.20 -> radius = (1.20 - 1) / (1.20 + 1) ~ 0.0909
-    u_12, v_12 = vswr_circle(1.20, num_points=180)
+    u_12, v_12 = _PRECOMP_VSWR_12
     ax.plot(
         u_12,
         v_12,
@@ -141,8 +146,7 @@ def draw_smith_chart(
         zorder=4,
     )
 
-    # Secondary acceptable circle: VSWR = 1.50 -> radius = (1.50 - 1) / (1.50 + 1) = 0.20
-    u_15, v_15 = vswr_circle(1.50, num_points=180)
+    u_15, v_15 = _PRECOMP_VSWR_15
     ax.plot(
         u_15,
         v_15,
@@ -273,7 +277,7 @@ def create_smith_chart(
     trail: Optional[Sequence[complex | tuple[float, float]]] = None,
     vswr: Optional[float] = None,
     target_gamma: Optional[complex | tuple[float, float]] = None,
-    figsize: tuple[float, float] = (5.5, 5.5),
+    figsize: tuple[float, float] = (5.2, 5.2),
     dark_mode: bool = False,
     show_labels: bool = True,
 ) -> plt.Figure:
